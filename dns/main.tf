@@ -1,79 +1,131 @@
-provider "google" {
-  project = var.project_id
-  region  = var.region
-}
+resource "google_dns_managed_zone" "root_zone" {
+  description = var.dns_zone_description
+  dns_name    = var.dns_zone_fqdn
+  name        = var.dns_zone_name
+  project     = var.gcp_project
 
-variable "zones" {
-  description = "List of DNS zones"
-  type        = list(object({
-    name          = string
-    dns_name      = string
-    description   = string
-    cname_records = list(object({
-      name  = string
-      alias = string
-      ttl   = number
-    }))
-    a_records     = list(object({
-      name    = string
-      address = string
-      ttl     = number
-    }))
-    txt_records   = list(object({
-      name    = string
-      txt_data = string
-      ttl     = number
-    }))
-  }))
-}
-
-resource "google_dns_managed_zone" "zones" {
-  for_each = { for idx, zone in var.zones : zone.name => idx }
-
-  name        = each.key
-  dns_name    = var.zones[each.value].dns_name
-  description = var.zones[each.value].description
-
-  labels = {
-    environment = "production"
+  dnssec_config {
+    state = var.dnssec_enabled ? "on" : "off"
   }
 }
 
-resource "google_dns_record_set" "cname_records" {
-  for_each = {
-    for zone in var.zones :
-    "${zone.name}-cname" => zone.cname_records
-  }
+resource "google_dns_record_set" "record_a_root" {
+  count = length(var.root_a_record) > 0 ? 1 : 0
 
-  managed_zone = google_dns_managed_zone.zones[each.key].name
-  name         = each.value.name
-  type         = "CNAME"
-  ttl          = each.value.ttl
-  rrdatas      = [each.value.alias]
-}
-
-resource "google_dns_record_set" "a_records" {
-  for_each = {
-    for zone in var.zones :
-    "${zone.name}-a" => zone.a_records
-  }
-
-  managed_zone = google_dns_managed_zone.zones[each.key].name
-  name         = each.value.name
+  managed_zone = google_dns_managed_zone.root_zone.name
+  name         = google_dns_managed_zone.root_zone.dns_name
+  project      = var.gcp_project
+  rrdatas      = var.root_a_record
+  ttl          = "300"
   type         = "A"
-  ttl          = each.value.ttl
-  rrdatas      = [each.value.address]
+
+  depends_on = [
+    google_dns_managed_zone.root_zone,
+  ]
 }
 
-resource "google_dns_record_set" "txt_records" {
-  for_each = {
-    for zone in var.zones :
-    "${zone.name}-txt" => zone.txt_records
-  }
+resource "google_dns_record_set" "record_a" {
+  for_each = var.a_records
 
-  managed_zone = google_dns_managed_zone.zones[each.key].name
-  name         = each.value.name
+  managed_zone = google_dns_managed_zone.root_zone.name
+  name         = "${each.key}.${google_dns_managed_zone.root_zone.dns_name}"
+  project      = var.gcp_project
+  rrdatas      = [each.value]
+  ttl          = "300"
+  type         = "A"
+
+  depends_on = [
+    google_dns_managed_zone.root_zone,
+  ]
+}
+
+resource "google_dns_record_set" "record_cname" {
+  for_each = var.cname_records
+
+  managed_zone = google_dns_managed_zone.root_zone.name
+  name         = "${each.key}.${google_dns_managed_zone.root_zone.dns_name}"
+  project      = var.gcp_project
+  rrdatas      = [each.value]
+  ttl          = "300"
+  type         = "CNAME"
+
+  depends_on = [
+    google_dns_managed_zone.root_zone,
+  ]
+}
+
+resource "google_dns_record_set" "record_mx_root" {
+  count = length(var.root_mx_records) > 0 ? 1 : 0
+
+  managed_zone = google_dns_managed_zone.root_zone.name
+  name         = google_dns_managed_zone.root_zone.dns_name
+  project      = var.gcp_project
+  rrdatas      = var.root_mx_records
+  ttl          = "300"
+  type         = "MX"
+
+  depends_on = [
+    google_dns_managed_zone.root_zone,
+  ]
+}
+
+resource "google_dns_record_set" "record_mx_subdomain" {
+  for_each = var.subdomain_mx_records
+
+  managed_zone = google_dns_managed_zone.root_zone.name
+  name         = "${each.key}.${google_dns_managed_zone.root_zone.dns_name}"
+  project      = var.gcp_project
+  rrdatas      = each.value
+  ttl          = "300"
+  type         = "MX"
+
+  depends_on = [
+    google_dns_managed_zone.root_zone,
+  ]
+}
+
+resource "google_dns_record_set" "subzone" {
+  for_each = var.subzones
+
+  managed_zone = google_dns_managed_zone.root_zone.name
+  name         = "${each.key}.${google_dns_managed_zone.root_zone.dns_name}"
+  project      = var.gcp_project
+  rrdatas      = each.value
+  ttl          = "300"
+  type         = "NS"
+
+  depends_on = [
+    google_dns_managed_zone.root_zone,
+  ]
+}
+
+resource "google_dns_record_set" "root_txt_records" {
+  count = length(var.root_txt_records) > 0 ? 1 : 0
+
+  managed_zone = google_dns_managed_zone.root_zone.name
+  name         = google_dns_managed_zone.root_zone.dns_name
+  project      = var.gcp_project
+  rrdatas      = var.root_txt_records
+  ttl          = "300"
   type         = "TXT"
-  ttl          = each.value.ttl
-  rrdatas      = [each.value.txt_data]
+
+  depends_on = [
+    google_dns_managed_zone.root_zone,
+  ]
+}
+
+
+resource "google_dns_record_set" "record_txt" {
+  for_each = var.txt_records
+
+  managed_zone = google_dns_managed_zone.root_zone.name
+  name         = "${each.key}.${google_dns_managed_zone.root_zone.dns_name}"
+  project      = var.gcp_project
+  rrdatas      = [each.value]
+  ttl          = "300"
+  type         = "TXT"
+
+  depends_on = [
+    google_dns_managed_zone.root_zone,
+  ]
 }
